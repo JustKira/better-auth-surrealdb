@@ -45,8 +45,6 @@ function deserializeRecord(record: SurrealRecord): SurrealRecord {
 	return out;
 }
 
-// Build SurrealQL object literal with per-field bindings to avoid the
-// "unexpected parameter" parse error that occurs with $obj in CONTENT/MERGE clauses.
 function buildObjectBindings(
 	obj: SurrealRecord,
 	prefix: string,
@@ -191,11 +189,8 @@ function mapFieldTypeToSurreal(type: string, required: boolean): string {
 export const surrealAdapter = (config: SurrealDBAdapterConfig) => {
 	let lazyOptions: BetterAuthOptions | null = null;
 	let activeDb: SurrealQueryable = config.db;
-	// Tracks records created during the active transaction for manual rollback.
-	// null means no transaction is in progress.
 	let txCreated: Array<{ model: string; id: string }> | null = null;
 
-	// Backtick-escape the table name to safely interpolate it into SurrealQL.
 	const tbl = (model: string) => `\`${model}\``;
 
 	const runQuery = async <T>(
@@ -289,11 +284,9 @@ export const surrealAdapter = (config: SurrealDBAdapterConfig) => {
 					try {
 						await trx.cancel();
 					} catch {
-						// best-effort
+						// cancel is best-effort; SurrealDB in-memory doesn't honour it
 					}
 					activeDb = previousDb;
-					// SurrealDB in-memory doesn't roll back via RPC cancel; manually delete
-					// any records created inside the failed transaction.
 					for (const { model, id } of toRollback) {
 						try {
 							await activeDb.query('DELETE $rid', {
@@ -399,8 +392,6 @@ export const surrealAdapter = (config: SurrealDBAdapterConfig) => {
 						bindings,
 					);
 					const records = rows.map(deserializeRecord);
-					// Factory does not project fields for findMany; do it here.
-					// Store with DB field names so transformOutput can remap them to schema names.
 					const projected = select?.length
 						? records.map((r) => {
 								const out: SurrealRecord = {};
@@ -552,12 +543,8 @@ export const surrealAdapter = (config: SurrealDBAdapterConfig) => {
 				tables: BetterAuthDBSchema;
 			}) => {
 				const usePlural = config.usePlural ?? false;
-				// Converts a BetterAuth model base name to the actual DB table name,
-				// respecting the usePlural setting (mirrors initGetModelName in the factory).
 				const toTable = (modelName: string) =>
 					usePlural ? `${modelName}s` : modelName;
-
-				// Returns the DB column name for a field in a given table key.
 				const toField = (tableKey: string, fieldKey: string) =>
 					tables[tableKey]?.fields?.[fieldKey]?.fieldName ?? fieldKey;
 
@@ -596,7 +583,6 @@ export const surrealAdapter = (config: SurrealDBAdapterConfig) => {
 					lines.push('');
 				}
 
-				// Generated when the Better Auth organization plugin is detected.
 				if (tables.member) {
 					const mTbl = toTable(tables.member.modelName);
 					const mUserId = toField('member', 'userId');
@@ -743,7 +729,6 @@ export const surrealAdapter = (config: SurrealDBAdapterConfig) => {
 					}
 				}
 
-				// ── Team helper functions ────────────────────────────────────────────
 				if (tables.teamMember) {
 					const tmTbl = toTable(tables.teamMember.modelName);
 					const tmUserId = toField('teamMember', 'userId');
@@ -788,10 +773,7 @@ export const surrealAdapter = (config: SurrealDBAdapterConfig) => {
 	return (options: BetterAuthOptions) => {
 		lazyOptions = options;
 		const a = adapterCreator(options);
-		// The test framework sets `adapter.transaction = void 0` after capturing
-		// the reference (createTestSuite.mjs). Subsequent wrapperAdapter() calls
-		// then see void 0 and fall back to a no-op transaction. Preserve the
-		// transaction method with a getter so it survives that assignment.
+		// Prevent the test framework from voiding the transaction property.
 		const t = a.transaction;
 		Object.defineProperty(a, 'transaction', {
 			get: () => t,

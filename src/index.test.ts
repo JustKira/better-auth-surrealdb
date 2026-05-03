@@ -54,16 +54,10 @@ const db = new Surreal();
 await db.connect(SURREAL_URL);
 await db.use({ namespace: SURREAL_NS, database: SURREAL_DB });
 
-// ─── Schema helper function tests ────────────────────────────────────────────
-//
-// Run BEFORE the adapter suite so they complete before onFinish kills the server.
-// Uses an isolated namespace (fn_test) to avoid cross-contamination.
-
 describe('SurrealDB Adapter', () => {
 	describe('schema helper functions', () => {
 		const fnDb = new Surreal();
 
-		// Stable IDs used across all sub-tests
 		const orgId = 'org_alpha';
 		const org2Id = 'org_beta';
 		const userAlice = 'user_alice';
@@ -76,8 +70,6 @@ describe('SurrealDB Adapter', () => {
 			await fnDb.connect(SURREAL_URL);
 			await fnDb.use({ namespace: 'fn_test', database: 'fn_test' });
 
-			// Build org-plugin tables via getAuthTables (avoids a full betterAuth() boot).
-			const _ = await import('@better-auth/core/db');
 			const orgPlugin = organization({
 				teams: { enabled: true },
 				// biome-ignore lint/suspicious/noExplicitAny: test-only cast
@@ -85,8 +77,6 @@ describe('SurrealDB Adapter', () => {
 			// biome-ignore lint/suspicious/noExplicitAny: minimal options for schema discovery
 			const fakeOptions = { plugins: [orgPlugin] } as any;
 
-			// Generate schema DDL using the default (usePlural: false) so helper
-			// functions reference singular table names (member, team, teamMember).
 			const adapter = surrealAdapter({ db: fnDb });
 			// biome-ignore lint/suspicious/noExplicitAny: createSchema not in public types
 			const schema = (await (adapter(fakeOptions) as any).createSchema?.(
@@ -95,12 +85,9 @@ describe('SurrealDB Adapter', () => {
 			)) as { code: string } | undefined;
 
 			if (schema?.code) {
-				// Execute the full DDL as a single query so SurrealDB can correctly
-				// parse DEFINE FUNCTION bodies that contain internal semicolons.
 				await fnDb.query(schema.code);
 			}
 
-			// Verify expected content in generated DDL
 			expect(schema?.code).toContain('fn::auth::organization::member_of');
 			expect(schema?.code).toContain('fn::auth::organization::get_role');
 			expect(schema?.code).toContain('fn::auth::organization::has_role');
@@ -108,16 +95,9 @@ describe('SurrealDB Adapter', () => {
 			expect(schema?.code).toContain('fn::auth::organization::teams');
 			expect(schema?.code).toContain('fn::auth::team::member_of');
 			expect(schema?.code).toContain('fn::auth::team::members');
-			// usePlural: false (default) → singular table names
-			expect(schema?.code).toContain(
-				'DEFINE TABLE IF NOT EXISTS member',
-			);
+			expect(schema?.code).toContain('DEFINE TABLE IF NOT EXISTS member');
 			expect(schema?.code).toContain('DEFINE TABLE IF NOT EXISTS team');
-			expect(schema?.code).toContain(
-				'DEFINE TABLE IF NOT EXISTS teamMember',
-			);
-
-			// ── Seed test data ────────────────────────────────────────────────
+			expect(schema?.code).toContain('DEFINE TABLE IF NOT EXISTS teamMember');
 
 			for (const [id, name, slug] of [
 				[orgId, 'Alpha Corp', 'alpha'],
@@ -129,7 +109,6 @@ describe('SurrealDB Adapter', () => {
 				);
 			}
 
-			// alice=owner, bob=admin, carol=member in org_alpha; alice=member in org_beta
 			for (const [mid, userId, organizationId, role] of [
 				['mem_1', userAlice, orgId, 'owner'],
 				['mem_2', userBob, orgId, 'admin'],
@@ -147,7 +126,6 @@ describe('SurrealDB Adapter', () => {
 				);
 			}
 
-			// Two teams in org_alpha; nothing in org_beta
 			for (const [tid, name] of [
 				[teamId, 'Red Team'],
 				[team2Id, 'Blue Team'],
@@ -158,7 +136,6 @@ describe('SurrealDB Adapter', () => {
 				);
 			}
 
-			// alice + bob in red team; carol in blue team
 			for (const [tmid, userId, tid] of [
 				['tm_1', userAlice, teamId],
 				['tm_2', userBob, teamId],
@@ -175,7 +152,6 @@ describe('SurrealDB Adapter', () => {
 			await fnDb.close();
 		});
 
-		// ── fn::auth::organization::member_of ────────────────────────────────────────
 
 		describe('fn::auth::organization::member_of', () => {
 			it('returns true when user is a member', async () => {
@@ -203,7 +179,6 @@ describe('SurrealDB Adapter', () => {
 			});
 		});
 
-		// ── fn::auth::organization::get_role ─────────────────────────────────────────
 
 		describe('fn::auth::organization::get_role', () => {
 			it('returns the correct role for each member', async () => {
@@ -230,7 +205,6 @@ describe('SurrealDB Adapter', () => {
 			});
 		});
 
-		// ── fn::auth::organization::has_role ─────────────────────────────────────────
 
 		describe('fn::auth::organization::has_role', () => {
 			it('owner satisfies has_role("owner")', async () => {
@@ -274,7 +248,6 @@ describe('SurrealDB Adapter', () => {
 			});
 		});
 
-		// ── fn::auth::organization::members ──────────────────────────────────────────
 		// Use array::len() in SurrealQL to avoid JS destructuring inconsistencies
 		// when SurrealDB returns a single record vs an array.
 
@@ -304,7 +277,6 @@ describe('SurrealDB Adapter', () => {
 			});
 		});
 
-		// ── fn::auth::organization::teams ────────────────────────────────────────────
 
 		describe('fn::auth::organization::teams', () => {
 			it('returns 2 team records for org_alpha', async () => {
@@ -324,7 +296,6 @@ describe('SurrealDB Adapter', () => {
 			});
 		});
 
-		// ── fn::auth::team::member_of ────────────────────────────────────────────────
 
 		describe('fn::auth::team::member_of', () => {
 			it('returns true when user is in the team', async () => {
@@ -352,7 +323,6 @@ describe('SurrealDB Adapter', () => {
 			});
 		});
 
-		// ── fn::auth::team::members ──────────────────────────────────────────────────
 
 		describe('fn::auth::team::members', () => {
 			it('returns 2 teamMember records for red team', async () => {
@@ -382,7 +352,6 @@ describe('SurrealDB Adapter', () => {
 	});
 });
 
-// ─── Adapter suite ─────────────────────────────────────────────────────────────
 
 const { execute } = await testAdapter({
 	adapter: async (_options) => surrealAdapter({ db }),
