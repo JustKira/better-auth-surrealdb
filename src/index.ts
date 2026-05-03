@@ -264,7 +264,7 @@ export const surrealAdapter = (config: SurrealDBAdapterConfig) => {
 		config: {
 			adapterId: 'surrealdb',
 			adapterName: 'SurrealDB Adapter',
-			usePlural: config.usePlural ?? true,
+			usePlural: config.usePlural ?? false,
 			supportsJSON: true,
 			supportsDates: true,
 			supportsBooleans: true,
@@ -551,7 +551,7 @@ export const surrealAdapter = (config: SurrealDBAdapterConfig) => {
 				file?: string;
 				tables: BetterAuthDBSchema;
 			}) => {
-				const usePlural = config.usePlural ?? true;
+				const usePlural = config.usePlural ?? false;
 				// Converts a BetterAuth model base name to the actual DB table name,
 				// respecting the usePlural setting (mirrors initGetModelName in the factory).
 				const toTable = (modelName: string) =>

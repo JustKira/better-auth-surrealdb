@@ -45,12 +45,12 @@ That's it. BetterAuth manages all table operations through the adapter.
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `db` | `Surreal` | required | A connected SurrealDB client instance |
-| `usePlural` | `boolean` | `true` | Use plural table names (`users` instead of `user`) |
+| `usePlural` | `boolean` | `false` | Use plural table names (`users` instead of `user`) |
 
 ```typescript
 surrealAdapter({
     db,
-    usePlural: false, // use singular table names
+    usePlural: true, // use plural table names
 })
 ```
 
@@ -205,7 +205,7 @@ Each plugin may add new tables. Re-run schema generation after adding plugins to
 
 ## SurrealDB Table Names
 
-By default the adapter uses plural table names: `users`, `sessions`, `verifications`, `accounts`. Set `usePlural: false` to use singular names instead.
+By default the adapter uses singular table names: `user`, `session`, `verification`, `account`. Set `usePlural: true` to use plural names instead.
 
 BetterAuth lets you override model names per-table via the `modelName` option in your config. The adapter respects those overrides automatically.
 

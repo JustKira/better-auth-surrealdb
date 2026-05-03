@@ -85,7 +85,8 @@ describe('SurrealDB Adapter', () => {
 			// biome-ignore lint/suspicious/noExplicitAny: minimal options for schema discovery
 			const fakeOptions = { plugins: [orgPlugin] } as any;
 
-			// Generate schema DDL (tables + helper functions) via our createSchema.
+			// Generate schema DDL using the default (usePlural: false) so helper
+			// functions reference singular table names (member, team, teamMember).
 			const adapter = surrealAdapter({ db: fnDb });
 			// biome-ignore lint/suspicious/noExplicitAny: createSchema not in public types
 			const schema = (await (adapter(fakeOptions) as any).createSchema?.(
@@ -107,13 +108,13 @@ describe('SurrealDB Adapter', () => {
 			expect(schema?.code).toContain('fn::auth::organization::teams');
 			expect(schema?.code).toContain('fn::auth::team::member_of');
 			expect(schema?.code).toContain('fn::auth::team::members');
-			// Table names must be pluralized (usePlural defaults to true)
+			// usePlural: false (default) → singular table names
 			expect(schema?.code).toContain(
-				'DEFINE TABLE IF NOT EXISTS members',
+				'DEFINE TABLE IF NOT EXISTS member',
 			);
-			expect(schema?.code).toContain('DEFINE TABLE IF NOT EXISTS teams');
+			expect(schema?.code).toContain('DEFINE TABLE IF NOT EXISTS team');
 			expect(schema?.code).toContain(
-				'DEFINE TABLE IF NOT EXISTS teamMembers',
+				'DEFINE TABLE IF NOT EXISTS teamMember',
 			);
 
 			// ── Seed test data ────────────────────────────────────────────────
@@ -123,8 +124,8 @@ describe('SurrealDB Adapter', () => {
 				[org2Id, 'Beta LLC', 'beta'],
 			] as const) {
 				await fnDb.query(
-					`INSERT INTO organizations { id: $id, name: $name, slug: $slug, createdAt: time::now() }`,
-					{ id: new RecordId('organizations', id), name, slug },
+					`INSERT INTO organization { id: $id, name: $name, slug: $slug, createdAt: time::now() }`,
+					{ id: new RecordId('organization', id), name, slug },
 				);
 			}
 
@@ -136,9 +137,9 @@ describe('SurrealDB Adapter', () => {
 				['mem_4', userAlice, org2Id, 'member'],
 			] as const) {
 				await fnDb.query(
-					`INSERT INTO members { id: $id, userId: $userId, organizationId: $oid, role: $role, createdAt: time::now() }`,
+					`INSERT INTO member { id: $id, userId: $userId, organizationId: $oid, role: $role, createdAt: time::now() }`,
 					{
-						id: new RecordId('members', mid),
+						id: new RecordId('member', mid),
 						userId,
 						oid: organizationId,
 						role,
@@ -152,8 +153,8 @@ describe('SurrealDB Adapter', () => {
 				[team2Id, 'Blue Team'],
 			] as const) {
 				await fnDb.query(
-					`INSERT INTO teams { id: $id, name: $name, organizationId: $oid, createdAt: time::now() }`,
-					{ id: new RecordId('teams', tid), name, oid: orgId },
+					`INSERT INTO team { id: $id, name: $name, organizationId: $oid, createdAt: time::now() }`,
+					{ id: new RecordId('team', tid), name, oid: orgId },
 				);
 			}
 
@@ -164,8 +165,8 @@ describe('SurrealDB Adapter', () => {
 				['tm_3', userCarol, team2Id],
 			] as const) {
 				await fnDb.query(
-					`INSERT INTO teamMembers { id: $id, userId: $userId, teamId: $tid, createdAt: time::now() }`,
-					{ id: new RecordId('teamMembers', tmid), userId, tid },
+					`INSERT INTO teamMember { id: $id, userId: $userId, teamId: $tid, createdAt: time::now() }`,
+					{ id: new RecordId('teamMember', tmid), userId, tid },
 				);
 			}
 		}, 30_000);
