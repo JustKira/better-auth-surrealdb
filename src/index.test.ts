@@ -14,7 +14,7 @@ import { RecordId, Surreal, Table } from 'surrealdb';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { surrealAdapter } from './index';
 
-const SURREAL_URL = 'ws://127.0.0.1:4321/rpc';
+const SURREAL_URL = process.env.SURREAL_URL ?? 'ws://127.0.0.1:4321/rpc';
 const SURREAL_NS = 'test';
 const SURREAL_DB = 'test';
 
@@ -35,18 +35,21 @@ async function waitForReady(url: string, timeoutMs = 10_000): Promise<void> {
 	);
 }
 
-const server: ChildProcess = spawn(
-	'surreal',
-	[
-		'start',
-		'memory',
-		'--bind',
-		'127.0.0.1:4321',
-		'--unauthenticated',
-		'--no-banner',
-	],
-	{ stdio: 'ignore', detached: false },
-);
+let server: ChildProcess | null = null;
+if (!process.env.SURREAL_URL) {
+	server = spawn(
+		'surreal',
+		[
+			'start',
+			'memory',
+			'--bind',
+			'127.0.0.1:4321',
+			'--unauthenticated',
+			'--no-banner',
+		],
+		{ stdio: 'ignore', detached: false },
+	);
+}
 
 await waitForReady(SURREAL_URL);
 
@@ -375,7 +378,7 @@ const { execute } = await testAdapter({
 	],
 	onFinish: async () => {
 		await db.close();
-		server.kill('SIGTERM');
+		server?.kill('SIGTERM');
 	},
 });
 
