@@ -17,6 +17,11 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Install SurrealDB
+        run: |
+          curl -sSf https://install.surrealdb.com | sh
+          echo "$HOME/.surrealdb" >> $GITHUB_PATH
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 

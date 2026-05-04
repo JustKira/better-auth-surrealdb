@@ -24,6 +24,11 @@ jobs:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
+      - name: Install SurrealDB
+        run: |
+          curl -sSf https://install.surrealdb.com | sh
+          echo "$HOME/.surrealdb" >> $GITHUB_PATH
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
