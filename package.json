@@ -2,15 +2,18 @@
 	"name": "@surrealdb/better-auth",
 	"version": "0.1.0",
 	"type": "module",
-	"main": "./src/index.ts",
-	"module": "./src/index.ts",
+	"main": "./dist/index.js",
+	"module": "./dist/index.js",
+	"types": "./dist/index.d.ts",
 	"exports": {
 		".": {
-			"import": "./src/index.ts",
-			"default": "./src/index.ts"
+			"import": "./dist/index.js",
+			"types": "./dist/index.d.ts"
 		}
 	},
+	"files": ["dist"],
 	"scripts": {
+		"build": "bun build ./src/index.ts --outdir dist --target node && tsc -p tsconfig.build.json --emitDeclarationOnly",
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"lint": "biome lint src/",
