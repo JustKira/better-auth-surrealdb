@@ -14,7 +14,7 @@ import { RecordId, Surreal, Table } from 'surrealdb';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { surrealAdapter } from './index';
 
-const SURREAL_URL = process.env.SURREAL_URL ?? 'ws://127.0.0.1:4321/rpc';
+const SURREAL_URL = process.env.SURREAL_URL ?? 'ws://127.0.0.1:4321';
 const SURREAL_NS = 'test';
 const SURREAL_DB = 'test';
 
@@ -53,8 +53,18 @@ if (!process.env.SURREAL_URL) {
 
 await waitForReady(SURREAL_URL);
 
+async function authenticate(s: Surreal): Promise<void> {
+	if (process.env.SURREAL_USER && process.env.SURREAL_PASS) {
+		await s.signin({
+			username: process.env.SURREAL_USER,
+			password: process.env.SURREAL_PASS,
+		});
+	}
+}
+
 const db = new Surreal();
 await db.connect(SURREAL_URL);
+await authenticate(db);
 await db.use({ namespace: SURREAL_NS, database: SURREAL_DB });
 
 describe('SurrealDB Adapter', () => {
@@ -71,6 +81,7 @@ describe('SurrealDB Adapter', () => {
 
 		beforeAll(async () => {
 			await fnDb.connect(SURREAL_URL);
+			await authenticate(fnDb);
 			await fnDb.use({ namespace: 'fn_test', database: 'fn_test' });
 
 			const orgPlugin = organization({
