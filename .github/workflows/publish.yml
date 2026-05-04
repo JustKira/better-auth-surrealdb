@@ -17,7 +17,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@8f24390df009a496891208e5e36b8a1de1f45135 # v2.0.2
         with:
-          bun-version: latest
+          bun-version: "1.2.21"
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -39,7 +39,7 @@ jobs:
 
       - name: Test
         timeout-minutes: 5
-        run: bun run test
+        run: npx vitest run --reporter=verbose
         env:
           SURREAL_URL: ws://127.0.0.1:4321
           SURREAL_USER: root
