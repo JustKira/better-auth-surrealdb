@@ -165,24 +165,26 @@ function buildWhereClause(
 }
 
 function mapFieldTypeToSurreal(type: string, required: boolean): string {
-	const wrap = (t: string) => (required ? t : `option<${t}>`);
+	// Optional fields use 'any' so SurrealDB accepts NULL (which is what
+	// better-auth sends for unset nullable fields) alongside NONE and typed values.
+	if (!required) return 'any';
 	switch (type) {
 		case 'string':
-			return wrap('string');
+			return 'string';
 		case 'number':
-			return wrap('number');
+			return 'number';
 		case 'boolean':
-			return wrap('bool');
+			return 'bool';
 		case 'date':
-			return wrap('datetime');
+			return 'datetime';
 		case 'json':
-			return wrap('object');
+			return 'object';
 		case 'string[]':
-			return wrap('array<string>');
+			return 'array<string>';
 		case 'number[]':
-			return wrap('array<number>');
+			return 'array<number>';
 		default:
-			return wrap('any');
+			return 'any';
 	}
 }
 
@@ -722,7 +724,7 @@ export const surrealAdapter = (config: SurrealDBAdapterConfig) => {
 						);
 						lines.push(`    LET $actions = $perms[$resource];`);
 						lines.push(
-							`    RETURN type::is::array($actions) AND $actions CONTAINS $action;`,
+							`    RETURN type::is_array($actions) AND $actions CONTAINS $action;`,
 						);
 						lines.push(`};`);
 						lines.push('');
