@@ -16,6 +16,17 @@ import {
 export interface SurrealDBAdapterConfig {
 	db: Surreal;
 	usePlural?: boolean;
+	/**
+	 * Table definition mode for generated schema.
+	 *
+	 * - `schemafull` (default): every known field is typed and constrained.
+	 *   Writes to fields not in the generated schema are rejected, so re-run
+	 *   schema generation after adding a plugin or additional fields.
+	 * - `schemaless`: known fields are still typed and indexed, but writes to
+	 *   unknown fields are accepted. Use this when an app adds many dynamic
+	 *   plugin fields and does not want to regenerate the schema each time.
+	 */
+	schemaMode?: 'schemafull' | 'schemaless';
 }
 
 type SurrealRecord = Record<string, unknown>;
@@ -164,10 +175,7 @@ function buildWhereClause(
 	return { sql: `WHERE ${parts.join(' ')}`, bindings };
 }
 
-function mapFieldTypeToSurreal(type: string, required: boolean): string {
-	// Optional fields use 'any' so SurrealDB accepts NULL (which is what
-	// better-auth sends for unset nullable fields) alongside NONE and typed values.
-	if (!required) return 'any';
+function baseSurrealType(type: string): string {
 	switch (type) {
 		case 'string':
 			return 'string';
@@ -186,6 +194,17 @@ function mapFieldTypeToSurreal(type: string, required: boolean): string {
 		default:
 			return 'any';
 	}
+}
+
+function mapFieldTypeToSurreal(type: string, required: boolean): string {
+	const base = baseSurrealType(type);
+	if (required) return base;
+	// Optional fields are typed as `option<T | null>`, which resolves to
+	// `T | NULL | NONE`. That covers the three states better-auth produces for a
+	// nullable field: a typed value, a stored NULL (sent to clear the field),
+	// and a missing value (NONE). This keeps the field typed instead of `any`.
+	if (base === 'any') return 'option<any>';
+	return `option<${base} | null>`;
 }
 
 export const surrealAdapter = (config: SurrealDBAdapterConfig) => {
@@ -545,6 +564,10 @@ export const surrealAdapter = (config: SurrealDBAdapterConfig) => {
 				tables: BetterAuthDBSchema;
 			}) => {
 				const usePlural = config.usePlural ?? false;
+				const tableMode =
+					config.schemaMode === 'schemaless'
+						? 'SCHEMALESS'
+						: 'SCHEMAFULL';
 				const toTable = (modelName: string) =>
 					usePlural ? `${modelName}s` : modelName;
 				const toField = (tableKey: string, fieldKey: string) =>
@@ -559,7 +582,7 @@ export const surrealAdapter = (config: SurrealDBAdapterConfig) => {
 				for (const [, model] of Object.entries(tables)) {
 					const tableName = toTable(model.modelName);
 					lines.push(
-						`DEFINE TABLE IF NOT EXISTS ${tableName} SCHEMAFULL;`,
+						`DEFINE TABLE IF NOT EXISTS ${tableName} ${tableMode} COMMENT 'Better Auth ${model.modelName} table';`,
 					);
 
 					for (const [fieldName, field] of Object.entries(
@@ -573,12 +596,21 @@ export const surrealAdapter = (config: SurrealDBAdapterConfig) => {
 							fieldTypeStr,
 							field.required !== false,
 						);
+						// Object (json) fields hold arbitrary nested keys, so they
+						// need FLEXIBLE for SurrealDB to accept undeclared subfields
+						// on a SCHEMAFULL table. FLEXIBLE is specified after TYPE.
+						const flexible = fieldTypeStr === 'json' ? ' FLEXIBLE' : '';
 						lines.push(
-							`DEFINE FIELD IF NOT EXISTS ${dbField} ON TABLE ${tableName} TYPE ${surrealType};`,
+							`DEFINE FIELD IF NOT EXISTS ${dbField} ON TABLE ${tableName} TYPE ${surrealType}${flexible};`,
 						);
+						// A unique constraint is also an index, so only emit one.
 						if (field.unique) {
 							lines.push(
 								`DEFINE INDEX IF NOT EXISTS idx_${tableName}_${dbField} ON TABLE ${tableName} FIELDS ${dbField} UNIQUE;`,
+							);
+						} else if (field.index) {
+							lines.push(
+								`DEFINE INDEX IF NOT EXISTS idx_${tableName}_${dbField} ON TABLE ${tableName} FIELDS ${dbField};`,
 							);
 						}
 					}
@@ -601,7 +633,7 @@ export const surrealAdapter = (config: SurrealDBAdapterConfig) => {
 						`DEFINE FUNCTION IF NOT EXISTS fn::auth::organization::member_of($userId: string, $organizationId: string) -> bool {`,
 					);
 					lines.push(
-						`    RETURN array::len((SELECT id FROM ${mTbl} WHERE ${mUserId} = $userId AND ${mOrgId} = $organizationId LIMIT 1)) > 0;`,
+						`    RETURN count(SELECT id FROM ${mTbl} WHERE ${mUserId} = $userId AND ${mOrgId} = $organizationId LIMIT 1) > 0;`,
 					);
 					lines.push(`};`);
 					lines.push('');
@@ -616,7 +648,7 @@ export const surrealAdapter = (config: SurrealDBAdapterConfig) => {
 						`DEFINE FUNCTION IF NOT EXISTS fn::auth::organization::get_role($userId: string, $organizationId: string) -> option<string> {`,
 					);
 					lines.push(
-						`    RETURN (SELECT VALUE ${mRole} FROM ${mTbl} WHERE ${mUserId} = $userId AND ${mOrgId} = $organizationId LIMIT 1)[0];`,
+						`    RETURN array::first(SELECT VALUE ${mRole} FROM ${mTbl} WHERE ${mUserId} = $userId AND ${mOrgId} = $organizationId LIMIT 1);`,
 					);
 					lines.push(`};`);
 					lines.push('');
@@ -661,7 +693,7 @@ export const surrealAdapter = (config: SurrealDBAdapterConfig) => {
 					lines.push(`};`);
 					lines.push('');
 
-					// Organization teams helper — only when team tables exist.
+					// Organization teams helper, emitted only when team tables exist.
 					if (tables.team) {
 						const tTbl = toTable(tables.team.modelName);
 						const tOrgId = toField('team', 'organizationId');
@@ -682,7 +714,7 @@ export const surrealAdapter = (config: SurrealDBAdapterConfig) => {
 						lines.push('');
 					}
 
-					// Dynamic permission helper — only when organizationRole table exists.
+					// Dynamic permission helper, emitted only when the organizationRole table exists.
 					if (tables.organizationRole) {
 						const orTbl = toTable(
 							tables.organizationRole.modelName,
@@ -719,8 +751,12 @@ export const surrealAdapter = (config: SurrealDBAdapterConfig) => {
 						lines.push(
 							`    IF array::len($rows) == 0 { RETURN false };`,
 						);
+						lines.push(`    LET $raw = $rows[0].${orPerm};`);
 						lines.push(
-							`    LET $perms = <object> $rows[0].${orPerm};`,
+							`    IF $raw = NONE OR $raw = "" { RETURN false };`,
+						);
+						lines.push(
+							`    LET $perms = encoding::json::decode($raw);`,
 						);
 						lines.push(`    LET $actions = $perms[$resource];`);
 						lines.push(
@@ -746,7 +782,7 @@ export const surrealAdapter = (config: SurrealDBAdapterConfig) => {
 						`DEFINE FUNCTION IF NOT EXISTS fn::auth::team::member_of($userId: string, $teamId: string) -> bool {`,
 					);
 					lines.push(
-						`    RETURN array::len((SELECT id FROM ${tmTbl} WHERE ${tmUserId} = $userId AND ${tmTeamId} = $teamId LIMIT 1)) > 0;`,
+						`    RETURN count(SELECT id FROM ${tmTbl} WHERE ${tmUserId} = $userId AND ${tmTeamId} = $teamId LIMIT 1) > 0;`,
 					);
 					lines.push(`};`);
 					lines.push('');

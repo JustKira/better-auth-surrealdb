@@ -10,7 +10,7 @@ import {
 import type { ChildProcess } from 'child_process';
 import { spawn } from 'child_process';
 import { organization } from 'better-auth/plugins/organization';
-import { RecordId, Surreal, Table } from 'surrealdb';
+import { RecordId, Surreal } from 'surrealdb';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { surrealAdapter } from './index';
 
@@ -86,6 +86,7 @@ describe('SurrealDB Adapter', () => {
 
 			const orgPlugin = organization({
 				teams: { enabled: true },
+				dynamicAccessControl: { enabled: true },
 				// biome-ignore lint/suspicious/noExplicitAny: test-only cast
 			} as any);
 			// biome-ignore lint/suspicious/noExplicitAny: minimal options for schema discovery
@@ -107,11 +108,35 @@ describe('SurrealDB Adapter', () => {
 			expect(schema?.code).toContain('fn::auth::organization::has_role');
 			expect(schema?.code).toContain('fn::auth::organization::members');
 			expect(schema?.code).toContain('fn::auth::organization::teams');
+			expect(schema?.code).toContain(
+				'fn::auth::organization::has_permission',
+			);
 			expect(schema?.code).toContain('fn::auth::team::member_of');
 			expect(schema?.code).toContain('fn::auth::team::members');
 			expect(schema?.code).toContain('DEFINE TABLE IF NOT EXISTS member');
 			expect(schema?.code).toContain('DEFINE TABLE IF NOT EXISTS team');
 			expect(schema?.code).toContain('DEFINE TABLE IF NOT EXISTS teamMember');
+			// Tables carry a COMMENT and default to SCHEMAFULL.
+			expect(schema?.code).toContain('SCHEMAFULL COMMENT');
+			// A required string field stays typed; better-auth marks role required.
+			expect(schema?.code).toMatch(
+				/DEFINE FIELD IF NOT EXISTS role ON TABLE member TYPE string;/,
+			);
+			// index: true fields get a non-unique index (member.userId references user).
+			expect(schema?.code).toMatch(
+				/DEFINE INDEX IF NOT EXISTS idx_member_userId ON TABLE member FIELDS userId;/,
+			);
+
+			// Insert organizationRole permission rows so has_permission resolves.
+			await fnDb.query(
+				`INSERT INTO organizationRole { id: $id, organizationId: $oid, role: $role, permission: $perm, createdAt: time::now() }`,
+				{
+					id: new RecordId('organizationRole', 'orole_admin'),
+					oid: orgId,
+					role: 'admin',
+					perm: '{"project":["create","read"]}',
+				},
+			);
 
 			for (const [id, name, slug] of [
 				[orgId, 'Alpha Corp', 'alpha'],
@@ -229,7 +254,7 @@ describe('SurrealDB Adapter', () => {
 				expect(r).toBe(true);
 			});
 
-			it('owner satisfies has_role("admin") — senior covers junior', async () => {
+			it('owner satisfies has_role("admin"): senior covers junior', async () => {
 				const [r] = await fnDb.query<[boolean]>(
 					'RETURN fn::auth::organization::has_role($u, $o, $m)',
 					{ u: userAlice, o: orgId, m: 'admin' },
@@ -363,20 +388,113 @@ describe('SurrealDB Adapter', () => {
 				expect(n).toBe(0);
 			});
 		});
+
+
+		describe('fn::auth::organization::has_permission', () => {
+			it('grants an action the role is permitted', async () => {
+				const [r] = await fnDb.query<[boolean]>(
+					'RETURN fn::auth::organization::has_permission($u, $o, $res, $act)',
+					{ u: userBob, o: orgId, res: 'project', act: 'create' },
+				);
+				expect(r).toBe(true);
+			});
+
+			it('denies an action not in the permission set', async () => {
+				const [r] = await fnDb.query<[boolean]>(
+					'RETURN fn::auth::organization::has_permission($u, $o, $res, $act)',
+					{ u: userBob, o: orgId, res: 'project', act: 'delete' },
+				);
+				expect(r).toBe(false);
+			});
+
+			it('denies a role with no organizationRole row', async () => {
+				const [r] = await fnDb.query<[boolean]>(
+					'RETURN fn::auth::organization::has_permission($u, $o, $res, $act)',
+					{ u: userCarol, o: orgId, res: 'project', act: 'create' },
+				);
+				expect(r).toBe(false);
+			});
+
+			it('denies a non-member', async () => {
+				const [r] = await fnDb.query<[boolean]>(
+					'RETURN fn::auth::organization::has_permission($u, $o, $res, $act)',
+					{ u: 'nobody', o: orgId, res: 'project', act: 'create' },
+				);
+				expect(r).toBe(false);
+			});
+		});
+	});
+
+	describe('schema generation', () => {
+		// biome-ignore lint/suspicious/noExplicitAny: minimal options for schema discovery
+		const fakeOptions = { plugins: [] } as any;
+
+		async function generate(
+			cfg: Parameters<typeof surrealAdapter>[0],
+		): Promise<string> {
+			const adapter = surrealAdapter(cfg);
+			// biome-ignore lint/suspicious/noExplicitAny: createSchema not in public types
+			const schema = (await (adapter(fakeOptions) as any).createSchema?.(
+				null,
+				undefined,
+			)) as { code: string } | undefined;
+			return schema?.code ?? '';
+		}
+
+		it('types optional fields as option<T | null> instead of any', async () => {
+			const code = await generate({ db });
+			// user.image and user.name: name is required, image is optional string.
+			expect(code).toContain(
+				'DEFINE FIELD IF NOT EXISTS image ON TABLE user TYPE option<string | null>;',
+			);
+			// session.expiresAt is a required date.
+			expect(code).toContain(
+				'DEFINE FIELD IF NOT EXISTS expiresAt ON TABLE session TYPE datetime;',
+			);
+			expect(code).not.toContain('TYPE any;');
+		});
+
+		it('emits SCHEMALESS tables when schemaMode is schemaless', async () => {
+			const code = await generate({ db, schemaMode: 'schemaless' });
+			expect(code).toContain('SCHEMALESS COMMENT');
+			expect(code).not.toContain('SCHEMAFULL');
+			// Known fields are still typed and indexed under schemaless.
+			expect(code).toContain('DEFINE FIELD IF NOT EXISTS');
+		});
+
+		it('defaults to SCHEMAFULL tables', async () => {
+			const code = await generate({ db });
+			expect(code).toContain('SCHEMAFULL COMMENT');
+			expect(code).not.toContain('SCHEMALESS');
+		});
 	});
 });
 
 
 const { execute } = await testAdapter({
 	adapter: async (_options) => surrealAdapter({ db }),
-	runMigrations: async (_options) => {
+	runMigrations: async (options) => {
+		// Drop existing table definitions so each migration applies a clean
+		// schema that matches the current better-auth options. Suites mutate
+		// options between runs, and SCHEMAFULL definitions persist otherwise.
 		const info =
 			await db.query<[{ tables: Record<string, unknown> }]>(
 				'INFO FOR DB',
 			);
 		const tables = Object.keys(info?.[0]?.tables ?? {});
 		for (const table of tables) {
-			await db.query('DELETE $table', { table: new Table(table) });
+			await db.query(`REMOVE TABLE IF EXISTS \`${table}\``);
+		}
+		// Apply the adapter's own generated SCHEMAFULL schema so every suite
+		// runs against the real DDL, not an implicit schemaless database.
+		const instance = surrealAdapter({ db })(options);
+		// biome-ignore lint/suspicious/noExplicitAny: createSchema not in public types
+		const schema = (await (instance as any).createSchema?.(
+			null,
+			undefined,
+		)) as { code: string } | undefined;
+		if (schema?.code) {
+			await db.query(schema.code);
 		}
 	},
 	tests: [

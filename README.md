@@ -1,6 +1,6 @@
 # @surrealdb/better-auth
 
-A [BetterAuth](https://better-auth.com) database adapter for [SurrealDB](https://surrealdb.com). Supports all BetterAuth plugins, schema generation, transactions, and every WHERE operator out of the box.
+A [BetterAuth](https://better-auth.com) database adapter for [SurrealDB](https://surrealdb.com). It supports all BetterAuth plugins, schema generation, transactions, and the full set of WHERE operators.
 
 ## Prerequisites
 
@@ -38,7 +38,7 @@ export const auth = betterAuth({
 });
 ```
 
-That's it. BetterAuth manages all table operations through the adapter.
+BetterAuth manages all table operations through the adapter.
 
 ## Configuration Options
 
@@ -46,6 +46,7 @@ That's it. BetterAuth manages all table operations through the adapter.
 |--------|------|---------|-------------|
 | `db` | `Surreal` | required | A connected SurrealDB client instance |
 | `usePlural` | `boolean` | `false` | Use plural table names (`users` instead of `user`) |
+| `schemaMode` | `'schemafull' \| 'schemaless'` | `'schemafull'` | Table mode used by generated schema. `schemaless` keeps known fields typed and indexed while accepting writes to undeclared fields |
 
 ```typescript
 surrealAdapter({
@@ -97,7 +98,9 @@ surreal import --conn http://localhost:8000 \
     schema.surql
 ```
 
-The generated schema uses `SCHEMAFULL` tables with `DEFINE FIELD` and `DEFINE INDEX` statements for unique constraints. Running it with `IF NOT EXISTS` clauses makes it safe to reapply.
+The generated schema uses `SCHEMAFULL` tables by default. Each field is typed from the BetterAuth schema: required fields take a concrete type (`string`, `datetime`, `bool`, and so on), optional fields use `option<T | null>` so they accept a typed value, a stored `NULL`, or a missing value, and object fields are marked `FLEXIBLE` so they hold arbitrary keys. `DEFINE INDEX` statements are emitted for unique fields and for fields BetterAuth marks as indexed. Every statement uses `IF NOT EXISTS`, so the file is safe to reapply.
+
+If your app adds many dynamic plugin fields and you do not want to regenerate the schema each time, set `schemaMode: 'schemaless'`. Known fields stay typed and indexed, and writes to undeclared fields are accepted.
 
 ## SurrealDB Helper Functions
 
@@ -173,11 +176,11 @@ await adapter.transaction(async (trx) => {
 });
 ```
 
-Transactions use `SurrealDB.beginTransaction()` under the hood. If any operation inside the callback throws, the transaction is cancelled and changes are discarded.
+Transactions use `SurrealDB.beginTransaction()`. If any operation inside the callback throws, the transaction is cancelled and changes are discarded.
 
 ## Using Plugins
 
-The adapter works with all BetterAuth plugins. Pass them in the `plugins` array as usual:
+The adapter works with all BetterAuth plugins. Pass them in the `plugins` array:
 
 ```typescript
 import { betterAuth } from 'better-auth';
