@@ -29,7 +29,7 @@ jobs:
           docker run -d --name surrealdb \
             -p 4321:8000 \
             -e SURREAL_CAPS_ALLOW_EXPERIMENTAL='*' \
-            surrealdb/surrealdb:v3.0.5 \
+            surrealdb/surrealdb:v3.1.4 \
             start --user root --pass root --bind 0.0.0.0:8000 memory
           timeout 30 sh -c 'until curl -sf http://localhost:4321/health; do sleep 1; done'
           docker logs surrealdb

@@ -4,7 +4,7 @@ A [BetterAuth](https://better-auth.com) database adapter for [SurrealDB](https:/
 
 ## Prerequisites
 
-- SurrealDB 3.x
+- SurrealDB 3.1+
 - BetterAuth 1.6.x
 - Node.js 18+ or Bun 1.x
 
